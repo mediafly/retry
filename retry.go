@@ -19,11 +19,12 @@ type Retry interface {
 // retry
 /////////////////////////////////////////////////////////////////////////////
 type retry struct {
-	options   Options
-	err       error
-	cancelled chan interface{}
-	done      chan interface{}
-	once      sync.Once
+	options     Options
+	doError     error
+	cancelError error
+	cancelled   chan interface{}
+	done        chan interface{}
+	once        sync.Once
 }
 
 func New(options Options) Retry {
@@ -46,9 +47,9 @@ func (r *retry) Do() error {
 	}
 
 	defer func() {
-		if r.err != nil {
+		if r.doError != nil {
 			if log.IsErrorEnabled() {
-				log.Error(r, "failed:", r.err)
+				log.Error(r, "failed:", r.doError)
 			}
 		} else {
 			if log.IsDebugEnabled() {
@@ -71,7 +72,7 @@ func (r *retry) Do() error {
 
 	maxDelay := time.Second * 30
 
-	if r.options.MaxDelay > 0 {
+	if r.options.MaxDelay >= 0 {
 		maxDelay = r.options.MaxDelay
 	}
 
@@ -82,9 +83,9 @@ func (r *retry) Do() error {
 	}
 
 	for attempt := uint32(0); attempt < maxAttempts; attempt++ {
-		if r.err != nil {
+		if r.doError != nil {
 			if log.IsErrorEnabled() {
-				log.Error(r, "attempt", attempt, "/", maxAttempts, "failed, retrying:", r.err)
+				log.Error(r, "attempt", attempt, "/", maxAttempts, "failed, retrying:", r.doError)
 			}
 		}
 
@@ -96,22 +97,29 @@ func (r *retry) Do() error {
 			if log.IsDebugEnabled() {
 				log.Debug(r, "cancelled")
 			}
-			r.err = &CancelledError{r}
+
 			if r.options.Cancel != nil {
 				if err := r.options.Cancel(); err != nil {
-					r.err = err
+					r.cancelError = err
 				}
 			}
-			return r.err
+
+			if r.doError == nil {
+				r.doError = &CancelledError{r, r.doError}
+			}
+
+			return r.doError
 
 		case <-time.After(deadline.Sub(time.Now().UTC())):
 			if log.IsDebugEnabled() {
 				log.Debug(r, "passed deadline")
 			}
-			if r.err == nil {
-				r.err = &DeadlineError{r}
+
+			if r.doError == nil {
+				r.doError = &DeadlineError{r}
 			}
-			return r.err
+
+			return r.doError
 
 		case <-time.After(delay):
 		}
@@ -122,14 +130,14 @@ func (r *retry) Do() error {
 
 		cont, err := r.options.Do()
 
-		r.err = err
+		r.doError = err
 
-		if r.err == nil || cont == Stop {
-			return r.err
+		if r.doError == nil || cont == Stop {
+			return r.doError
 		}
 	}
 
-	return r.err
+	return r.doError
 }
 
 func (r *retry) Cancel() error {
@@ -139,5 +147,5 @@ func (r *retry) Cancel() error {
 
 	<-r.done
 
-	return r.err
+	return r.cancelError
 }

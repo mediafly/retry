@@ -4,7 +4,8 @@ package retry
 // CancelledError
 /////////////////////////////////////////////////////////////////////////////
 type CancelledError struct {
-	Retry Retry
+	Retry  Retry
+	Source error
 }
 
 func (e *CancelledError) Error() string {
