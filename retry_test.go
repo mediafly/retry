@@ -3,33 +3,22 @@ package retry
 import (
 	"errors"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/context"
 	"testing"
 	"time"
 )
 
-func TestContinueWithNoErrorStops(t *testing.T) {
-	invoked := 0
-	options := Options{
-		Do: func() (Result, error) {
-			invoked++
-			return Continue, nil
-		},
-		Log: &NullLogger{},
-	}
-	assert.NoError(t, Do(options))
-	assert.Equal(t, 1, invoked)
-}
-
-func TestContinueWithErrorContinues(t *testing.T) {
+func TestContinue(t *testing.T) {
+	err := errors.New("TestContinue")
 	invoked := 0
 	options := Options{
 		MaxDelay: 0,
-		Do: func() (Result, error) {
+		Do: func() Result {
 			invoked++
 			if invoked == 2 {
-				return Stop, nil
+				return Stop()
 			} else {
-				return Continue, errors.New("failed")
+				return Continue(err)
 			}
 		},
 		Log: &NullLogger{},
@@ -41,9 +30,9 @@ func TestContinueWithErrorContinues(t *testing.T) {
 func TestStopWithNoErrorStops(t *testing.T) {
 	invoked := 0
 	options := Options{
-		Do: func() (Result, error) {
+		Do: func() Result {
 			invoked++
-			return Stop, nil
+			return Stop()
 		},
 		Log: &NullLogger{},
 	}
@@ -52,12 +41,12 @@ func TestStopWithNoErrorStops(t *testing.T) {
 }
 
 func TestStopWithErrorStops(t *testing.T) {
-	err := errors.New("error")
+	err := errors.New("TestStopWithErrorStops")
 	invoked := 0
 	options := Options{
-		Do: func() (Result, error) {
+		Do: func() Result {
 			invoked++
-			return Stop, err
+			return Stop(err)
 		},
 		Log: &NullLogger{},
 	}
@@ -66,14 +55,14 @@ func TestStopWithErrorStops(t *testing.T) {
 }
 
 func TestMaxAttempts(t *testing.T) {
-	err := errors.New("error")
+	err := errors.New("TestMaxAttempts")
 	invoked := 0
 	options := Options{
 		MaxAttempts: 10,
 		MaxDelay:    0,
-		Do: func() (Result, error) {
+		Do: func() Result {
 			invoked++
-			return Continue, err
+			return Continue(err)
 		},
 		Log: &NullLogger{},
 	}
@@ -82,33 +71,33 @@ func TestMaxAttempts(t *testing.T) {
 }
 
 func TestDeadline(t *testing.T) {
-	err := errors.New("error")
+	err := errors.New("TestDeadline")
 	invoked := 0
 	options := Options{
 		Deadline: time.Now().UTC().Add(time.Millisecond),
 		MaxDelay: 0,
-		Do: func() (Result, error) {
+		Do: func() Result {
 			invoked++
-			return Continue, err
+			return Continue(err)
 		},
 		Log: &NullLogger{},
 	}
-	assert.Equal(t, err, Do(options))
+	assert.Equal(t, err, Do(options).(*DeadlineError).Err)
 	assert.True(t, invoked > 0)
 }
 
 func TestMaxDelay(t *testing.T) {
-	err := errors.New("error")
+	err := errors.New("TestMaxDelay")
 	invoked := 0
 	options := Options{
 		MaxDelay: time.Millisecond,
 		Deadline: time.Now().UTC().Add(time.Millisecond * 10),
-		Do: func() (Result, error) {
+		Do: func() Result {
 			invoked++
 			if invoked == 3 {
-				return Stop, err
+				return Stop(err)
 			} else {
-				return Continue, err
+				return Continue(err)
 			}
 		},
 		Log: &NullLogger{},
@@ -117,51 +106,25 @@ func TestMaxDelay(t *testing.T) {
 	assert.Equal(t, 3, invoked)
 }
 
-func TestCancelledWithNoCancelError(t *testing.T) {
-	err := errors.New("TestCancelledWithNoCancelError")
-	cancelled := make(chan interface{})
+func TestCancelled(t *testing.T) {
+	err := errors.New("TestCancelled")
+	ctx, cancel := context.WithCancel(context.Background())
+	invoked := 0
 	options := Options{
-		Do: func() (Result, error) {
-			<-cancelled
-			return Stop, err
-		},
-		Cancel: func() error {
-			close(cancelled)
-			return nil
+		MaxDelay: 0,
+		Context:  ctx,
+		Do: func() Result {
+			invoked++
+			return Continue(err)
 		},
 		Log: &NullLogger{},
 	}
 
-	retry := New(options)
-
 	go func() {
-		assert.IsType(t, &CancelledError{}, retry.Do())
+		<-time.After(time.Microsecond)
+		cancel()
 	}()
 
-	assert.NoError(t, retry.Cancel())
-}
-
-func TestCancelledWithCancelError(t *testing.T) {
-	err := errors.New("TestCancelledWithCancelError")
-	cancelError := errors.New("Cancel Failed")
-	cancelled := make(chan interface{})
-	options := Options{
-		Do: func() (Result, error) {
-			<-cancelled
-			return Stop, err
-		},
-		Cancel: func() error {
-			close(cancelled)
-			return cancelError
-		},
-		Log: &NullLogger{},
-	}
-
-	retry := New(options)
-
-	go func() {
-		assert.IsType(t, &CancelledError{}, retry.Do())
-	}()
-
-	assert.Equal(t, cancelError, retry.Cancel())
+	assert.Equal(t, err, Do(options).(*CancelledError).Err)
+	assert.True(t, invoked > 0)
 }

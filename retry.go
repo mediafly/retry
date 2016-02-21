@@ -2,8 +2,9 @@ package retry
 
 import (
 	"fmt"
-	"math"
-	"sync"
+	"github.com/mediafly/math"
+	"github.com/mediafly/math/constants"
+	"golang.org/x/net/context"
 	"time"
 )
 
@@ -12,140 +13,107 @@ import (
 /////////////////////////////////////////////////////////////////////////////
 type Retry interface {
 	Do() error
-	Cancel() error
 }
 
 /////////////////////////////////////////////////////////////////////////////
 // retry
 /////////////////////////////////////////////////////////////////////////////
 type retry struct {
-	options     Options
-	doError     error
-	cancelError error
-	cancelled   chan interface{}
-	done        chan interface{}
-	once        sync.Once
+	Options
 }
 
 func New(options Options) Retry {
-	return &retry{
-		options:   options,
-		cancelled: make(chan interface{}),
-		done:      make(chan interface{}),
-	}
+	return &retry{options}
 }
 
 func (r *retry) String() string {
-	return fmt.Sprintf("[%T Tag=%v]", r, r.options.Tag)
+	return fmt.Sprintf("[%T Tag=%v]", r, r.Tag)
 }
 
 func (r *retry) Do() error {
-	log := r.options.Log
+	log := r.Log
 
 	if log == nil {
 		log = defaultLogger
 	}
 
-	defer func() {
-		if r.doError != nil {
-			if log.IsErrorEnabled() {
-				log.Error(r, "failed:", r.doError)
-			}
-		} else {
-			if log.IsDebugEnabled() {
-				log.Debug(r, "completed")
-			}
-		}
+	maxAttempts := constants.MaxUint32
 
-		close(r.done)
-	}()
-
-	if log.IsDebugEnabled() {
-		log.Debug(r, "started")
-	}
-
-	maxAttempts := uint32(math.MaxUint32)
-
-	if r.options.MaxAttempts > 0 {
-		maxAttempts = r.options.MaxAttempts
+	if r.MaxAttempts > 0 {
+		maxAttempts = r.MaxAttempts
 	}
 
 	maxDelay := time.Second * 30
 
-	if r.options.MaxDelay >= 0 {
-		maxDelay = r.options.MaxDelay
+	if r.MaxDelay >= 0 {
+		maxDelay = r.MaxDelay
 	}
 
-	deadline := time.Now().UTC().Add(time.Duration(int64(math.MaxInt64)))
+	deadline := constants.MaxTime
 
-	if r.options.Deadline.After(time.Now().UTC()) {
-		deadline = r.options.Deadline
+	if r.Deadline.After(time.Now().UTC()) {
+		deadline = r.Deadline
 	}
 
-	for attempt := uint32(0); attempt < maxAttempts; attempt++ {
-		if r.doError != nil {
-			if log.IsErrorEnabled() {
-				log.Error(r, "attempt", attempt, "/", maxAttempts, "failed, retrying:", r.doError)
+	ctx := r.Context
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var attempt uint32 = 0
+	var result Result = &continueResult{nil}
+
+	for {
+		if result, ok := result.(*stopResult); ok {
+			if log.IsDebugEnabled() {
+				log.Debug(r, "completed")
 			}
+
+			return result.Err
 		}
 
-		delay := minDuration(maxDelay, time.Second*time.Duration(attempt*attempt))
+		{
+			result := result.(*continueResult)
 
-		// TODO: allow Cancel to run concurrently with Do
-		select {
-		case <-r.cancelled:
-			if log.IsDebugEnabled() {
-				log.Debug(r, "cancelled")
+			if attempt >= maxAttempts {
+				if log.IsErrorEnabled() {
+					log.Error(r, "failed, max attempts:", result.Err)
+				}
+				return result.Err
 			}
 
-			if r.options.Cancel != nil {
-				if err := r.options.Cancel(); err != nil {
-					r.cancelError = err
+			if attempt == 0 {
+				if log.IsDebugEnabled() {
+					log.Debug(r, "started")
+				}
+			} else {
+				if log.IsErrorEnabled() {
+					log.Error(r, "retrying attempt", attempt+1, "of", maxAttempts, ":", result.Err)
 				}
 			}
 
-			if r.doError == nil {
-				r.doError = &CancelledError{r, r.doError}
+			delay := math.MinDuration(maxDelay, time.Second*time.Duration(attempt*attempt))
+
+			select {
+			case <-ctx.Done():
+				if log.IsErrorEnabled() {
+					log.Error(r, "cancelled:", result.Err)
+				}
+				return &CancelledError{r, result.Err}
+
+			case <-time.After(deadline.Sub(time.Now().UTC())):
+				if log.IsErrorEnabled() {
+					log.Error(r, "passed deadline:", result.Err)
+				}
+				return &DeadlineError{r, result.Err}
+
+			case <-time.After(delay):
 			}
-
-			return r.doError
-
-		case <-time.After(deadline.Sub(time.Now().UTC())):
-			if log.IsDebugEnabled() {
-				log.Debug(r, "passed deadline")
-			}
-
-			if r.doError == nil {
-				r.doError = &DeadlineError{r}
-			}
-
-			return r.doError
-
-		case <-time.After(delay):
 		}
 
-		if log.IsDebugEnabled() {
-			log.Debug(r, "do")
-		}
+		result = r.Options.Do()
 
-		cont, err := r.options.Do()
-
-		r.doError = err
-
-		if r.doError == nil || cont == Stop {
-			return r.doError
-		}
+		attempt++
 	}
-
-	return r.doError
-}
-
-func (r *retry) Cancel() error {
-	r.once.Do(func() {
-		close(r.cancelled)
-	})
-
-	<-r.done
-
-	return r.cancelError
 }

@@ -36,10 +36,11 @@ type StandardLogger struct {
 }
 
 func (l *StandardLogger) IsDebugEnabled() bool {
-	return false
+	return true
 }
 
 func (l *StandardLogger) Debug(v ...interface{}) {
+	l.Println(v...)
 }
 
 func (l *StandardLogger) IsErrorEnabled() bool {

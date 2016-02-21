@@ -11,11 +11,11 @@ Retry an operation as many times as necessary until it completes successfully.
 
 ```golang
 options := retry.Options{
-    Do: func() (retry.Result, error) {
+    Do: func() retry.Result {
         if err := DoSomething(); err != nil {
-            return retry.Continue, err
+            return retry.Continue(err)
         } else {
-            return retry.Stop, nil
+            return retry.Stop()
         }
     },
 }
@@ -51,32 +51,25 @@ options := retry.Options {
 }
 ```
 
-*Optional cancellation (work in progress)*
+*Cancellation support*
 
 ```golang
-cancelled := make(chan interface{})
+ctx, cancel := context.WithCancel(context.Background())
 
 options := retry.Options{
-    Do: func() (retry.Result, error) {
-        if err := DoSomething(cancelled); err != nil {
-            return retry.Continue, err
+    Context: ctx,
+    Do: func() retry.Result {
+        if err := DoSomething(); err != nil {
+            return retry.Continue(err)
         } else {
-            return retry.Stop, nil
+            return retry.Stop()
         }
     },
-    Cancel: func() error {
-        close(cancelled)
-        return nil
-    }
 }
 
-retry := retry.New(options)
+go retry.Do(options)
 
-go retry.Do()
-
-if err := retry.Cancel(); err != nil {
-    log.Println("retry cancel failed:", err)
-}
+cancel()
 ```
 
 ## LICENSE

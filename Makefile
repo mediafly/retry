@@ -10,6 +10,7 @@ help:
 	@echo
 
 deps:
+	@go get github.com/mediafly/math
 	@go get github.com/stretchr/testify/assert
 
 test:

@@ -1,23 +1,58 @@
 package retry
 
-import (
-	"fmt"
-)
-
-type Result int
-
-const (
-	Stop     Result = iota
-	Continue Result = iota
-)
-
-func (r Result) String() string {
-	switch r {
-	case Continue:
-		return "continue"
-	case Stop:
-		return "stop"
-	default:
-		panic(fmt.Sprint("invalid result:", r))
+/////////////////////////////////////////////////////////////////////////////
+// Helpers
+/////////////////////////////////////////////////////////////////////////////
+func Continue(err error) Result {
+	if err == nil {
+		panic("err was nil")
 	}
+
+	return &continueResult{err}
+}
+
+func Stop(err ...error) Result {
+	if len(err) > 1 {
+		panic("length of err > 1")
+	}
+
+	result := stopResult{}
+
+	if len(err) > 0 {
+		result.Err = err[0]
+	}
+
+	return &result
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Result
+/////////////////////////////////////////////////////////////////////////////
+type Result interface {
+	result()
+}
+
+func (r *continueResult) result() {}
+func (r *stopResult) result()     {}
+
+/////////////////////////////////////////////////////////////////////////////
+// continueResult
+/////////////////////////////////////////////////////////////////////////////
+type continueResult struct {
+	Err error
+}
+
+func (c *continueResult) String() string {
+	return "continue"
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// stopResult
+/////////////////////////////////////////////////////////////////////////////
+type stopResult struct {
+	Err error
+}
+
+func (s *stopResult) String() string {
+	return "stop"
 }
