@@ -1,3 +1,7 @@
+/*
+Retry is a utility package to to facilitate operations that need to be retried
+when they fail.
+*/
 package retry
 
 import (
@@ -8,20 +12,17 @@ import (
 	"time"
 )
 
-/////////////////////////////////////////////////////////////////////////////
-// Retry
-/////////////////////////////////////////////////////////////////////////////
+// Retry represents an operation that needs to be retried until is finishes
+// successfully.
 type Retry interface {
 	Do() error
 }
 
-/////////////////////////////////////////////////////////////////////////////
-// retry
-/////////////////////////////////////////////////////////////////////////////
 type retry struct {
 	Options
 }
 
+// Returns a new Retry operation based on Options.
 func New(options Options) Retry {
 	return &retry{options}
 }
@@ -30,11 +31,19 @@ func (r *retry) String() string {
 	return fmt.Sprintf("[%T Tag=%v]", r, r.Tag)
 }
 
+// Perform the operation until it completes successfully or retry thresholds
+// are crossed.
 func (r *retry) Do() error {
-	log := r.Log
+	debugLog := r.DebugLog
 
-	if log == nil {
-		log = defaultLogger
+	if debugLog == nil {
+		debugLog = defaultDebugLogger
+	}
+
+	errorLog := r.ErrorLog
+
+	if errorLog == nil {
+		errorLog = defaultErrorLogger
 	}
 
 	maxAttempts := constants.MaxUint32
@@ -66,8 +75,8 @@ func (r *retry) Do() error {
 
 	for {
 		if result, ok := result.(*stopResult); ok {
-			if log.IsDebugEnabled() {
-				log.Debug(r, "completed")
+			if debugLog != nil {
+				debugLog(r, "completed")
 			}
 
 			return result.Err
@@ -77,19 +86,19 @@ func (r *retry) Do() error {
 			result := result.(*continueResult)
 
 			if attempt >= maxAttempts {
-				if log.IsErrorEnabled() {
-					log.Error(r, "failed, max attempts:", result.Err)
+				if errorLog != nil {
+					errorLog(r, "failed, max attempts:", result.Err)
 				}
 				return result.Err
 			}
 
 			if attempt == 0 {
-				if log.IsDebugEnabled() {
-					log.Debug(r, "started")
+				if debugLog != nil {
+					debugLog(r, "started")
 				}
 			} else {
-				if log.IsErrorEnabled() {
-					log.Error(r, "retrying attempt", attempt+1, "of", maxAttempts, ":", result.Err)
+				if errorLog != nil {
+					errorLog(r, "retrying attempt", attempt+1, "of", maxAttempts, ":", result.Err)
 				}
 			}
 
@@ -97,14 +106,14 @@ func (r *retry) Do() error {
 
 			select {
 			case <-ctx.Done():
-				if log.IsErrorEnabled() {
-					log.Error(r, "cancelled:", result.Err)
+				if errorLog != nil {
+					errorLog(r, "cancelled:", result.Err)
 				}
 				return &CancelledError{r, result.Err}
 
 			case <-time.After(deadline.Sub(time.Now().UTC())):
-				if log.IsErrorEnabled() {
-					log.Error(r, "passed deadline:", result.Err)
+				if errorLog != nil {
+					errorLog(r, "passed deadline:", result.Err)
 				}
 				return &DeadlineError{r, result.Err}
 

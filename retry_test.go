@@ -21,7 +21,6 @@ func TestContinue(t *testing.T) {
 				return Continue(err)
 			}
 		},
-		Log: &NullLogger{},
 	}
 	assert.NoError(t, Do(options))
 	assert.Equal(t, 2, invoked)
@@ -34,7 +33,6 @@ func TestStopWithNoErrorStops(t *testing.T) {
 			invoked++
 			return Stop()
 		},
-		Log: &NullLogger{},
 	}
 	assert.NoError(t, Do(options))
 	assert.Equal(t, 1, invoked)
@@ -48,7 +46,6 @@ func TestStopWithErrorStops(t *testing.T) {
 			invoked++
 			return Stop(err)
 		},
-		Log: &NullLogger{},
 	}
 	assert.Equal(t, err, Do(options))
 	assert.Equal(t, 1, invoked)
@@ -64,7 +61,6 @@ func TestMaxAttempts(t *testing.T) {
 			invoked++
 			return Continue(err)
 		},
-		Log: &NullLogger{},
 	}
 	assert.Equal(t, err, Do(options))
 	assert.Equal(t, 10, invoked)
@@ -80,7 +76,6 @@ func TestDeadline(t *testing.T) {
 			invoked++
 			return Continue(err)
 		},
-		Log: &NullLogger{},
 	}
 	assert.Equal(t, err, Do(options).(*DeadlineError).Err)
 	assert.True(t, invoked > 0)
@@ -100,7 +95,6 @@ func TestMaxDelay(t *testing.T) {
 				return Continue(err)
 			}
 		},
-		Log: &NullLogger{},
 	}
 	assert.Equal(t, err, Do(options))
 	assert.Equal(t, 3, invoked)
@@ -117,7 +111,6 @@ func TestCancelled(t *testing.T) {
 			invoked++
 			return Continue(err)
 		},
-		Log: &NullLogger{},
 	}
 
 	go func() {

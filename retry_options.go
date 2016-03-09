@@ -15,5 +15,6 @@ type Options struct {
 	Deadline    time.Time
 	MaxAttempts uint32
 	MaxDelay    time.Duration
-	Log         Logger
+	DebugLog    Logger
+	ErrorLog    Logger
 }
